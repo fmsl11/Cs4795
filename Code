@@ -1,1 +1,422 @@
+import heapq
+import time
+import pandas as pd
+import matplotlib.pyplot as plt
 
+# =========================================================
+# CS4795 - N-Puzzle A* Project
+# Complete code using the generated dataset CSV file
+# Expected CSV format:
+# =========================================================
+
+DATASET_FILE = "n_puzzle_dataset_100.csv"
+
+GOAL_STATE = (1, 2, 3,
+              4, 5, 6,
+              7, 8, 0)
+
+GOAL_POSITIONS = {value: index for index, value in enumerate(GOAL_STATE)}
+
+
+# =========================================================
+# HEURISTICS
+# =========================================================
+def misplaced_tiles(state):
+    count = 0
+    for i in range(len(state)):
+        if state[i] != 0 and state[i] != GOAL_STATE[i]:
+            count += 1
+    return count
+
+
+def manhattan_distance(state):
+    distance = 0
+    for i, value in enumerate(state):
+        if value == 0:
+            continue
+
+        goal_index = GOAL_POSITIONS[value]
+
+        current_row, current_col = divmod(i, 3)
+        goal_row, goal_col = divmod(goal_index, 3)
+
+        distance += abs(current_row - goal_row) + abs(current_col - goal_col)
+
+    return distance
+
+
+def improved_heuristic(state):
+    # A simple improved heuristic:
+    # Manhattan Distance + Linear Conflict
+    return manhattan_distance(state) + linear_conflict(state)
+
+
+def linear_conflict(state):
+    conflict = 0
+
+    # Check rows
+    for row in range(3):
+        row_values = []
+        for col in range(3):
+            index = row * 3 + col
+            tile = state[index]
+
+            if tile != 0:
+                goal_index = GOAL_POSITIONS[tile]
+                goal_row, goal_col = divmod(goal_index, 3)
+
+                if goal_row == row:
+                    row_values.append((col, goal_col))
+
+        for i in range(len(row_values)):
+            for j in range(i + 1, len(row_values)):
+                current_col_i, goal_col_i = row_values[i]
+                current_col_j, goal_col_j = row_values[j]
+
+                if goal_col_i > goal_col_j:
+                    conflict += 2
+
+    # Check columns
+    for col in range(3):
+        col_values = []
+        for row in range(3):
+            index = row * 3 + col
+            tile = state[index]
+
+            if tile != 0:
+                goal_index = GOAL_POSITIONS[tile]
+                goal_row, goal_col = divmod(goal_index, 3)
+
+                if goal_col == col:
+                    col_values.append((row, goal_row))
+
+        for i in range(len(col_values)):
+            for j in range(i + 1, len(col_values)):
+                current_row_i, goal_row_i = col_values[i]
+                current_row_j, goal_row_j = col_values[j]
+
+                if goal_row_i > goal_row_j:
+                    conflict += 2
+
+    return conflict
+
+
+# =========================================================
+# PUZZLE HELPERS
+# =========================================================
+def print_state(state):
+    for i in range(0, 9, 3):
+        row = state[i:i + 3]
+        print(" ".join(str(x) if x != 0 else "_" for x in row))
+    print()
+
+
+def get_neighbors(state):
+    neighbors = []
+
+    zero_index = state.index(0)
+    row, col = divmod(zero_index, 3)
+
+    if row > 0:
+        new_index = zero_index - 3
+        new_state = list(state)
+        new_state[zero_index], new_state[new_index] = new_state[new_index], new_state[zero_index]
+        neighbors.append(tuple(new_state))
+
+    if row < 2:
+        new_index = zero_index + 3
+        new_state = list(state)
+        new_state[zero_index], new_state[new_index] = new_state[new_index], new_state[zero_index]
+        neighbors.append(tuple(new_state))
+
+    if col > 0:
+        new_index = zero_index - 1
+        new_state = list(state)
+        new_state[zero_index], new_state[new_index] = new_state[new_index], new_state[zero_index]
+        neighbors.append(tuple(new_state))
+
+    if col < 2:
+        new_index = zero_index + 1
+        new_state = list(state)
+        new_state[zero_index], new_state[new_index] = new_state[new_index], new_state[zero_index]
+        neighbors.append(tuple(new_state))
+
+    return neighbors
+
+
+def reconstruct_path(parent, goal_state):
+    path = []
+    current = goal_state
+
+    while current is not None:
+        path.append(current)
+        current = parent[current]
+
+    path.reverse()
+    return path
+
+
+def is_goal(state):
+    return state == GOAL_STATE
+
+
+# =========================================================
+# A* SEARCH
+# =========================================================
+def astar(start_state, heuristic_function):
+    start_time = time.time()
+
+    open_heap = []
+    closed_set = set()
+
+    g_cost = {start_state: 0}
+    parent = {start_state: None}
+
+    # counter avoids tuple comparison issues if priorities match
+    counter = 0
+    f_start = heuristic_function(start_state)
+    heapq.heappush(open_heap, (f_start, counter, start_state))
+
+    nodes_expanded = 0
+    max_frontier_size = 1
+
+    while open_heap:
+        max_frontier_size = max(max_frontier_size, len(open_heap))
+
+        current_f, _, current_state = heapq.heappop(open_heap)
+
+        if current_state in closed_set:
+            continue
+
+        nodes_expanded += 1
+
+        if is_goal(current_state):
+            end_time = time.time()
+            solution_path = reconstruct_path(parent, current_state)
+
+            return {
+                "solved": True,
+                "solution_path": solution_path,
+                "steps": len(solution_path) - 1,
+                "nodes_expanded": nodes_expanded,
+                "execution_time": end_time - start_time,
+                "max_frontier_size": max_frontier_size
+            }
+
+        closed_set.add(current_state)
+
+        for neighbor in get_neighbors(current_state):
+            if neighbor in closed_set:
+                continue
+
+            tentative_g = g_cost[current_state] + 1
+
+            if neighbor not in g_cost or tentative_g < g_cost[neighbor]:
+                g_cost[neighbor] = tentative_g
+                parent[neighbor] = current_state
+
+                counter += 1
+                f_neighbor = tentative_g + heuristic_function(neighbor)
+                heapq.heappush(open_heap, (f_neighbor, counter, neighbor))
+
+    end_time = time.time()
+
+    return {
+        "solved": False,
+        "solution_path": None,
+        "steps": -1,
+        "nodes_expanded": nodes_expanded,
+        "execution_time": end_time - start_time,
+        "max_frontier_size": max_frontier_size
+    }
+
+
+# =========================================================
+# DATASET LOADING
+# =========================================================
+def parse_state(state_string):
+    return tuple(int(x) for x in state_string.split(","))
+
+
+def load_dataset(csv_file):
+    df = pd.read_csv(csv_file)
+
+    puzzles = []
+    for _, row in df.iterrows():
+        puzzle_id = row["puzzle_id"]
+        state = parse_state(row["state"])
+        puzzles.append((puzzle_id, state))
+
+    return puzzles
+
+
+# =========================================================
+# EXPERIMENTS
+# =========================================================
+def run_experiments(puzzles):
+    heuristics = {
+        "Misplaced Tiles": misplaced_tiles,
+        "Manhattan Distance": manhattan_distance,
+        "Improved Heuristic": improved_heuristic
+    }
+
+    all_results = []
+
+    for puzzle_id, state in puzzles:
+        print(f"Running puzzle {puzzle_id}...")
+
+        for heuristic_name, heuristic_function in heuristics.items():
+            result = astar(state, heuristic_function)
+
+            all_results.append({
+                "puzzle_id": puzzle_id,
+                "initial_state": ",".join(map(str, state)),
+                "heuristic": heuristic_name,
+                "solved": result["solved"],
+                "steps": result["steps"],
+                "nodes_expanded": result["nodes_expanded"],
+                "execution_time": result["execution_time"],
+                "max_frontier_size": result["max_frontier_size"]
+            })
+
+    return pd.DataFrame(all_results)
+
+
+def summarize_results(results_df):
+    summary_df = results_df.groupby("heuristic").agg(
+        puzzles_tested=("puzzle_id", "count"),
+        solved_count=("solved", "sum"),
+        average_steps=("steps", "mean"),
+        average_nodes_expanded=("nodes_expanded", "mean"),
+        average_execution_time=("execution_time", "mean"),
+        average_max_frontier_size=("max_frontier_size", "mean")
+    ).reset_index()
+
+    summary_df["average_steps"] = summary_df["average_steps"].round(2)
+    summary_df["average_nodes_expanded"] = summary_df["average_nodes_expanded"].round(2)
+    summary_df["average_execution_time"] = summary_df["average_execution_time"].round(6)
+    summary_df["average_max_frontier_size"] = summary_df["average_max_frontier_size"].round(2)
+
+    return summary_df
+
+
+# =========================================================
+# VISUALIZATION
+# =========================================================
+def plot_bar_chart(summary_df, column_name, title, ylabel, output_file):
+    plt.figure(figsize=(8, 5))
+    plt.bar(summary_df["heuristic"], summary_df[column_name])
+    plt.title(title)
+    plt.xlabel("Heuristic")
+    plt.ylabel(ylabel)
+    plt.xticks(rotation=15)
+    plt.tight_layout()
+    plt.savefig(output_file)
+    plt.show()
+
+
+def create_all_plots(summary_df):
+    plot_bar_chart(
+        summary_df,
+        "average_nodes_expanded",
+        "Average Nodes Expanded by Heuristic",
+        "Average Nodes Expanded",
+        "avg_nodes_expanded.png"
+    )
+
+    plot_bar_chart(
+        summary_df,
+        "average_execution_time",
+        "Average Execution Time by Heuristic",
+        "Average Execution Time (seconds)",
+        "avg_execution_time.png"
+    )
+
+    plot_bar_chart(
+        summary_df,
+        "average_steps",
+        "Average Solution Steps by Heuristic",
+        "Average Steps",
+        "avg_steps.png"
+    )
+
+    plot_bar_chart(
+        summary_df,
+        "average_max_frontier_size",
+        "Average Max Frontier Size by Heuristic",
+        "Average Max Frontier Size",
+        "avg_frontier_size.png"
+    )
+
+
+# =========================================================
+# OPTIONAL: SHOW ONE SAMPLE SOLUTION
+# =========================================================
+def show_sample_solution(state, heuristic_function, heuristic_name):
+    print("===================================")
+    print(f"SAMPLE SOLUTION USING {heuristic_name.upper()}")
+    print("===================================")
+
+    print("Initial state:")
+    print_state(state)
+
+    result = astar(state, heuristic_function)
+
+    print("Solved:", result["solved"])
+    print("Steps:", result["steps"])
+    print("Nodes Expanded:", result["nodes_expanded"])
+    print("Execution Time:", round(result["execution_time"], 6), "seconds")
+    print("Max Frontier Size:", result["max_frontier_size"])
+    print()
+
+    if result["solution_path"] is not None:
+        for step_number, board in enumerate(result["solution_path"]):
+            print(f"Step {step_number}:")
+            print_state(board)
+
+
+# =========================================================
+# MAIN
+# =========================================================
+def main():
+    print("Loading dataset...")
+    puzzles = load_dataset(DATASET_FILE)
+    print(f"Loaded {len(puzzles)} puzzles from {DATASET_FILE}")
+    print()
+
+    print("Running experiments on all puzzles...")
+    results_df = run_experiments(puzzles)
+    print()
+
+    print("Saving detailed results...")
+    results_df.to_csv("n_puzzle_detailed_results.csv", index=False)
+    print("Saved: n_puzzle_detailed_results.csv")
+    print()
+
+    print("Creating summary table...")
+    summary_df = summarize_results(results_df)
+    print(summary_df)
+    print()
+
+    print("Saving summary results...")
+    summary_df.to_csv("n_puzzle_summary_results.csv", index=False)
+    print("Saved: n_puzzle_summary_results.csv")
+    print()
+
+    print("Generating plots...")
+    create_all_plots(summary_df)
+    print("Saved plot files:")
+    print("- avg_nodes_expanded.png")
+    print("- avg_execution_time.png")
+    print("- avg_steps.png")
+    print("- avg_frontier_size.png")
+    print()
+
+    # Show one sample solution using the first puzzle in the dataset
+    sample_puzzle_id, sample_state = puzzles[0]
+    print(f"Showing sample solution for puzzle {sample_puzzle_id}")
+    show_sample_solution(sample_state, improved_heuristic, "Improved Heuristic")
+
+
+if __name__ == "__main__":
+    main()
